@@ -32,20 +32,20 @@
         </constructor-arg>
     </bean>
 
-    <osgi:reference id="esbHttpEndpoint" interface="org.apache.camel.component.netty4.http.NettySharedHttpServer" />
 
 
 
 
-        <camel:camelContext xmlns="http://camel.apache.org/schema/spring">
-            <camel:dataFormats>
-                <camel:json id="json" library="Jackson" />
-            </camel:dataFormats>
-            <camel:restConfiguration component="netty4-http" enableCORS="true">
-                <camel:endpointProperty key="nettySharedHttpServer" value="#esbHttpEndpoint" />
-            </camel:restConfiguration>
 
-            <camel:rest path="conektaApi">
+    <camel:camelContext xmlns="http://camel.apache.org/schema/spring">
+        <camel:dataFormats>
+            <camel:json id="json" library="Jackson" />
+        </camel:dataFormats>
+        <camel:restConfiguration component="netty4-http" enableCORS="true">
+            <camel:endpointProperty key="nettySharedHttpServer" value="#esbHttpEndpoint" />
+        </camel:restConfiguration>
+
+        <camel:rest path="conektaApi">
             <camel:post uri="/token" id="getToken" consumes="application/json">
                 <camel:to uri="direct:createToken" />
             </camel:post>
@@ -55,112 +55,120 @@
             </camel:post>
         </camel:rest>
 
-            <camel:route id="createToken">
-                <camel:from uri="direct:createToken" />
-                <camel:onException>
-                    <camel:exception>java.lang.Exception</camel:exception>
-                    <camel:handled><camel:constant>true</camel:constant></camel:handled>
-                    <camel:log message="error in token request" />
+        <camel:route id="createToken">
+            <camel:from uri="direct:createToken" />
+            <camel:onException>
+                <camel:exception>java.lang.Exception</camel:exception>
+                <camel:handled><camel:constant>true</camel:constant></camel:handled>
+                <camel:log message="error in token request" />
+                <camel:setBody>
+                    <camel:simple>{"message":"invalid data request"}</camel:simple>
+                </camel:setBody>
+                <camel:stop />
+            </camel:onException>
+
+            <camel:unmarshal ref="json"/>
+            <camel:bean ref="utils" method="validateTokenRequest"/>
+            <camel:choice>
+                <camel:when>
+                    <camel:simple>${header.validData} == false</camel:simple>
                     <camel:setBody>
-                        <camel:simple>{"message":"invalid data request"}</camel:simple>
+                        <camel:simple>{"message":"invalid data request", "errorReason":"${header.errorReason}"}</camel:simple>
                     </camel:setBody>
-                    <camel:stop />
-                </camel:onException>
+                </camel:when>
+                <camel:otherwise>
+                    <camel:to uri="direct:saveData" />
 
-                <camel:unmarshal ref="json"/>
-                <camel:bean ref="utils" method="validateTokenRequest"/>
-                <camel:choice>
-                    <camel:when>
-                        <camel:simple>${header.validData} == false</camel:simple>
-                        <camel:setBody>
-                            <camel:simple>{"message":"invalid data request", "errorReason":"${header.errorReason}"}</camel:simple>
-                        </camel:setBody>
-                    </camel:when>
-                    <camel:otherwise>
-                        <camel:to uri="mongodb:mongoBean?{{mongodb.query.insertQuery}}" />
-
-                        <camel:setBody>
-                            <camel:simple>{"token":"${header.token}"}</camel:simple>
-                        </camel:setBody>
-                    </camel:otherwise>
-                </camel:choice>
-            </camel:route>
-
-            <camel:route id="purchase">
-                <camel:from uri="direct:purchase" />
-                <camel:onException>
-                    <camel:exception>java.lang.Exception</camel:exception>
-                    <camel:handled><camel:constant>true</camel:constant></camel:handled>
-                    <camel:log message="error in token request" />
                     <camel:setBody>
-                        <camel:simple>{"message":"invalid data request"}</camel:simple>
+                        <camel:simple>{"token":"${header.token}"}</camel:simple>
                     </camel:setBody>
-                    <camel:stop />
-                </camel:onException>
+                </camel:otherwise>
+            </camel:choice>
+        </camel:route>
+
+        <camel:route id="purchase">
+            <camel:from uri="direct:purchase" />
+            <camel:onException>
+                <camel:exception>java.lang.Exception</camel:exception>
+                <camel:handled><camel:constant>true</camel:constant></camel:handled>
+                <camel:log message="error in token request" />
+                <camel:setBody>
+                    <camel:simple>{"message":"invalid data request"}</camel:simple>
+                </camel:setBody>
+                <camel:stop />
+            </camel:onException>
+            <camel:unmarshal ref="json"/>
+            <camel:choice>
+                <camel:when>
+                    <camel:simple>${body['token']} == null</camel:simple>
+                    <camel:setBody>
+                        <camel:simple>{"message":"invalid data request", "this request not contains token"}</camel:simple>
+                    </camel:setBody>
+                </camel:when>
+                <camel:when>
+                    <camel:simple>${body['amount']} == null</camel:simple>
+                    <camel:setBody>
+                        <camel:simple>{"message":"invalid data request", "this request not contains amount"}</camel:simple>
+                    </camel:setBody>
+                </camel:when>
+                <camel:otherwise>
+
+                    <camel:setHeader headerName="originalRequest">
+                        <camel:simple>${body}</camel:simple>
+                    </camel:setHeader>
+                    <camel:setHeader headerName="amount">
+                        <camel:simple>${body['amount']}</camel:simple>
+                    </camel:setHeader>
+
+                    <camel:setBody>
+                        <camel:simple>{"token":"${body['token']}"}</camel:simple>
+                    </camel:setBody>
+                    <camel:to uri="direct:findData" />
+
+                    <camel:setBody><camel:simple resultType="java.lang.String">${body}</camel:simple></camel:setBody>
+                    <camel:bean ref="utils" method="validatePurchase"/>
+                    <camel:choice>
+                        <camel:when>
+                            <camel:simple>${header.validData} == false</camel:simple>
+                            <camel:setBody>
+                                <camel:simple>{"message":"invalid data request", "errorReason":"${header.errorReason}"}</camel:simple>
+                            </camel:setBody>
+                        </camel:when>
+                        <camel:otherwise>
+                            <camel:setBody>
+                                <camel:simple>{"message":"payment processed"}</camel:simple>
+                            </camel:setBody>
+
+                        </camel:otherwise>
+                    </camel:choice>
 
 
-                <camel:unmarshal ref="json"/>
 
+                </camel:otherwise>
+            </camel:choice>
 
-                <camel:choice>
-                    <camel:when>
-                        <camel:simple>${body['token']} == null</camel:simple>
-                        <camel:setBody>
-                            <camel:simple>{"message":"invalid data request", "this request not contains token"}</camel:simple>
-                        </camel:setBody>
-                    </camel:when>
-                    <camel:when>
-                        <camel:simple>${body['amount']} == null</camel:simple>
-                        <camel:setBody>
-                            <camel:simple>{"message":"invalid data request", "this request not contains amount"}</camel:simple>
-                        </camel:setBody>
-                    </camel:when>
-                    <camel:otherwise>
+        </camel:route>
 
-                        <camel:setHeader headerName="originalRequest">
-                            <camel:simple>${body}</camel:simple>
-                        </camel:setHeader>
-                        <camel:setHeader headerName="amount">
-                            <camel:simple>${body['amount']}</camel:simple>
-                        </camel:setHeader>
+        <camel:route id="saveData" >
+            <camel:from uri="direct:saveData" />
+            <camel:to uri="mongodb:mongoBean?{{mongodb.query.insertQuery}}" />
+        </camel:route>
 
-                        <camel:setBody>
-                            <camel:simple>{"token":"${body['token']}"}</camel:simple>
-                        </camel:setBody>
-                        <camel:to uri="mongodb:mongoBean?{{mongodb.query.findOrder}}" />
-
-                        <camel:setBody><camel:simple resultType="java.lang.String">${body}</camel:simple></camel:setBody>
-                        <camel:bean ref="utils" method="validatePurchase"/>
-                        <camel:choice>
-                            <camel:when>
-                                <camel:simple>${header.validData} == false</camel:simple>
-                                <camel:setBody>
-                                    <camel:simple>{"message":"invalid data request", "errorReason":"${header.errorReason}"}</camel:simple>
-                                </camel:setBody>
-                            </camel:when>
-                            <camel:otherwise>
-                                <camel:setBody>
-                                    <camel:simple>{"message":"payment processed"}</camel:simple>
-                                </camel:setBody>
-
-                            </camel:otherwise>
-                        </camel:choice>
+        <camel:route id="findData" >
+            <camel:from uri="direct:findData" />
+            <camel:to uri="mongodb:mongoBean?{{mongodb.query.findOrder}}" />
+        </camel:route>
 
 
 
-                    </camel:otherwise>
-                </camel:choice>
 
-            </camel:route>
-
-
-            <camel:route id="validatePurchase">
-                <camel:from uri="direct:validatePurchase" />
-                <camel:bean ref="utils" method="validatePurchase"/>
-            </camel:route>
+        <camel:route id="validatePurchase">
+            <camel:from uri="direct:validatePurchase" />
+            <camel:bean ref="utils" method="validatePurchase"/>
+        </camel:route>
 
 
   
-  </camel:camelContext>
+    </camel:camelContext>
 
 </beans>
