@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:camel="http://camel.apache.org/schema/spring"
+       xmlns:cxf="http://camel.apache.org/schema/cxf"
+       xmlns:osgi="http://www.springframework.org/schema/osgi"
+       xsi:schemaLocation="
+    http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+    http://camel.apache.org/schema/cxf http://camel.apache.org/schema/cxf/camel-cxf.xsd
+    http://www.springframework.org/schema/osgi http://www.springframework.org/schema/osgi/spring-osgi.xsd
+    http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd
+  "
+>
+
+    <bean id="bridgePropertyPlaceholder" class="org.apache.camel.spring.spi.BridgePropertyPlaceholderConfigurer">
+        <property name="ignoreResourceNotFound" value="true" />
+        <property name="locations">
+          <list>
+              <value>classpath:config.properties</value>
+              <value>file:/opt/conf/conekta.properties</value>
+          </list>
+        </property>
+    </bean>
+    <bean id="utils" class="com.ragna.conekta.Utils">
+        <constructor-arg index="0" value="{{llave.encriptacion}}"/>
+    </bean>
+    <bean id="mongoBean" class="com.mongodb.Mongo">
+        <constructor-arg index="0">
+            <bean class="com.mongodb.MongoURI">
+                <constructor-arg index="0" value="${mongodb.url}" />
+            </bean>
+        </constructor-arg>
+    </bean>
+
+    <osgi:reference id="esbHttpEndpoint" interface="org.apache.camel.component.netty4.http.NettySharedHttpServer" />
+
+
+
+
+        <camel:camelContext xmlns="http://camel.apache.org/schema/spring">
+            <camel:dataFormats>
+                <camel:json id="json" library="Jackson" />
+            </camel:dataFormats>
+            <camel:restConfiguration component="netty4-http" enableCORS="true">
+                <camel:endpointProperty key="nettySharedHttpServer" value="#esbHttpEndpoint" />
+            </camel:restConfiguration>
+
+            <camel:rest path="conektaApi">
+            <camel:post uri="/token" id="getToken" consumes="application/json">
+                <camel:to uri="direct:createToken" />
+            </camel:post>
+
+            <camel:post uri="/purchase" id="post-purchase" consumes="application/json">
+                <camel:to uri="direct:purchase" />
+            </camel:post>
+        </camel:rest>
+
+            <camel:route id="createToken">
+                <camel:from uri="direct:createToken" />
+                <camel:onException>
+                    <camel:exception>java.lang.Exception</camel:exception>
+                    <camel:handled><camel:constant>true</camel:constant></camel:handled>
+                    <camel:log message="error in token request" />
+                    <camel:setBody>
+                        <camel:simple>{"message":"invalid data request"}</camel:simple>
+                    </camel:setBody>
+                    <camel:stop />
+                </camel:onException>
+
+                <camel:unmarshal ref="json"/>
+                <camel:bean ref="utils" method="validateTokenRequest"/>
+                <camel:choice>
+                    <camel:when>
+                        <camel:simple>${header.validData} == false</camel:simple>
+                        <camel:setBody>
+                            <camel:simple>{"message":"invalid data request", "errorReason":"${header.errorReason}"}</camel:simple>
+                        </camel:setBody>
+                    </camel:when>
+                    <camel:otherwise>
+                        <camel:to uri="mongodb:mongoBean?{{mongodb.query.insertQuery}}" />
+
+                        <camel:setBody>
+                            <camel:simple>{"token":"${header.token}"}</camel:simple>
+                        </camel:setBody>
+                    </camel:otherwise>
+                </camel:choice>
+            </camel:route>
+
+            <camel:route id="purchase">
+                <camel:from uri="direct:purchase" />
+                <camel:onException>
+                    <camel:exception>java.lang.Exception</camel:exception>
+                    <camel:handled><camel:constant>true</camel:constant></camel:handled>
+                    <camel:log message="error in token request" />
+                    <camel:setBody>
+                        <camel:simple>{"message":"invalid data request"}</camel:simple>
+                    </camel:setBody>
+                    <camel:stop />
+                </camel:onException>
+
+
+                <camel:unmarshal ref="json"/>
+
+
+                <camel:choice>
+                    <camel:when>
+                        <camel:simple>${body['token']} == null</camel:simple>
+                        <camel:setBody>
+                            <camel:simple>{"message":"invalid data request", "this request not contains token"}</camel:simple>
+                        </camel:setBody>
+                    </camel:when>
+                    <camel:when>
+                        <camel:simple>${body['amount']} == null</camel:simple>
+                        <camel:setBody>
+                            <camel:simple>{"message":"invalid data request", "this request not contains amount"}</camel:simple>
+                        </camel:setBody>
+                    </camel:when>
+                    <camel:otherwise>
+
+                        <camel:setHeader headerName="originalRequest">
+                            <camel:simple>${body}</camel:simple>
+                        </camel:setHeader>
+                        <camel:setHeader headerName="amount">
+                            <camel:simple>${body['amount']}</camel:simple>
+                        </camel:setHeader>
+
+                        <camel:setBody>
+                            <camel:simple>{"token":"${body['token']}"}</camel:simple>
+                        </camel:setBody>
+                        <camel:to uri="mongodb:mongoBean?{{mongodb.query.findOrder}}" />
+
+                        <camel:setBody><camel:simple resultType="java.lang.String">${body}</camel:simple></camel:setBody>
+                        <camel:bean ref="utils" method="validatePurchase"/>
+                        <camel:choice>
+                            <camel:when>
+                                <camel:simple>${header.validData} == false</camel:simple>
+                                <camel:setBody>
+                                    <camel:simple>{"message":"invalid data request", "errorReason":"${header.errorReason}"}</camel:simple>
+                                </camel:setBody>
+                            </camel:when>
+                            <camel:otherwise>
+                                <camel:setBody>
+                                    <camel:simple>{"message":"payment processed"}</camel:simple>
+                                </camel:setBody>
+
+                            </camel:otherwise>
+                        </camel:choice>
+
+
+
+                    </camel:otherwise>
+                </camel:choice>
+
+            </camel:route>
+
+
+            <camel:route id="validatePurchase">
+                <camel:from uri="direct:validatePurchase" />
+                <camel:bean ref="utils" method="validatePurchase"/>
+            </camel:route>
+
+
+  
+  </camel:camelContext>
+
+</beans>
