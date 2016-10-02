@@ -151,12 +151,12 @@
 
         <camel:route id="saveData" >
             <camel:from uri="direct:saveData" />
-            <camel:to uri="mongodb:mongoBean?{{mongodb.query.insertQuery}}" />
+            <camel:to uri="{{mongodb.query.insertQuery}}" />
         </camel:route>
 
         <camel:route id="findData" >
             <camel:from uri="direct:findData" />
-            <camel:to uri="mongodb:mongoBean?{{mongodb.query.findOrder}}" />
+            <camel:to uri="{{mongodb.query.findOrder}}" />
         </camel:route>
 
 
