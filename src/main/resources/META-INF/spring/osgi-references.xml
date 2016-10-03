@@ -8,6 +8,6 @@
 	"
 >
 
-    <osgi:reference id="esbHttpEndpoint" interface="org.apache.camel.component.netty.http.NettySharedHttpServer" />
+    <osgi:reference id="esbHttpEndpoint" interface="org.apache.camel.component.netty4.http.NettySharedHttpServer" />
 
 </beans>
